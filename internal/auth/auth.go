@@ -6,8 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,13 +15,14 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mdjarv/todoist-cli/internal/todoist"
 )
 
 const (
 	AuthURL      = "https://todoist.com/oauth/authorize"
-	TokenURL     = "https://todoist.com/oauth/access_token"
-	Scopes       = "data:read_write,data:delete" // Covers list, add, remove, complete tasks
-	CallbackPort = 47829                         // Static port for OAuth callback
+	Scopes       = "data:read_write,data:delete"
+	CallbackPort = 47829
 )
 
 var (
@@ -34,14 +35,7 @@ type Credentials struct {
 	TokenType   string `json:"token_type"`
 }
 
-type TokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	Error       string `json:"error,omitempty"`
-}
-
 func Login() error {
-	// Load environment variables from .env file
 	if err := loadEnv(); err != nil {
 		return fmt.Errorf("failed to load .env file: %w", err)
 	}
@@ -50,13 +44,11 @@ func Login() error {
 		return fmt.Errorf("TODOIST_CLIENT_ID and TODOIST_CLIENT_SECRET must be set in .env file")
 	}
 
-	// Generate random state for CSRF protection
 	state, err := generateRandomState()
 	if err != nil {
 		return fmt.Errorf("failed to generate state: %w", err)
 	}
 
-	// Start local server for OAuth callback
 	listener, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", CallbackPort))
 	if err != nil {
 		return fmt.Errorf("failed to start local server on port %d: %w", CallbackPort, err)
@@ -64,18 +56,14 @@ func Login() error {
 	defer listener.Close()
 
 	redirectURI := fmt.Sprintf("http://localhost:%d/callback", CallbackPort)
-
-	// Build authorization URL
 	authURL := buildAuthURL(redirectURI, state)
 
 	fmt.Printf("Please visit the following URL to authorize the application:\n\n%s\n\n", authURL)
 	fmt.Println("Waiting for authorization...")
 
-	// Channel to receive authorization code
 	codeChan := make(chan string, 1)
 	errChan := make(chan error, 1)
 
-	// Start HTTP server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		handleCallback(w, r, state, codeChan, errChan)
@@ -83,12 +71,11 @@ func Login() error {
 
 	server := &http.Server{Handler: mux}
 	go func() {
-		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errChan <- fmt.Errorf("server error: %w", err)
 		}
 	}()
 
-	// Wait for callback or timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -102,17 +89,21 @@ func Login() error {
 		return fmt.Errorf("authorization timeout")
 	}
 
-	// Shutdown server
 	server.Shutdown(context.Background())
 
-	// Exchange code for token
-	token, err := exchangeCodeForToken(code, redirectURI)
+	// Use the client for token exchange
+	client := todoist.NewClient("") // Empty token for OAuth calls
+	tokenResp, err := client.ExchangeCodeForToken(code, redirectURI, ClientID, ClientSecret)
 	if err != nil {
 		return fmt.Errorf("failed to exchange code for token: %w", err)
 	}
 
-	// Save credentials
-	if err := saveCredentials(token); err != nil {
+	creds := &Credentials{
+		AccessToken: tokenResp.AccessToken,
+		TokenType:   tokenResp.TokenType,
+	}
+
+	if err := saveCredentials(creds); err != nil {
 		return fmt.Errorf("failed to save credentials: %w", err)
 	}
 
@@ -140,14 +131,12 @@ func buildAuthURL(redirectURI, state string) string {
 }
 
 func handleCallback(w http.ResponseWriter, r *http.Request, expectedState string, codeChan chan<- string, errChan chan<- error) {
-	// Check for error parameter
 	if errParam := r.URL.Query().Get("error"); errParam != "" {
 		errChan <- fmt.Errorf("authorization error: %s", errParam)
 		http.Error(w, "Authorization failed", http.StatusBadRequest)
 		return
 	}
 
-	// Verify state parameter
 	state := r.URL.Query().Get("state")
 	if state != expectedState {
 		errChan <- fmt.Errorf("invalid state parameter")
@@ -155,7 +144,6 @@ func handleCallback(w http.ResponseWriter, r *http.Request, expectedState string
 		return
 	}
 
-	// Get authorization code
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		errChan <- fmt.Errorf("missing authorization code")
@@ -163,49 +151,8 @@ func handleCallback(w http.ResponseWriter, r *http.Request, expectedState string
 		return
 	}
 
-	// Send success response to browser
 	fmt.Fprintf(w, "Authorization successful! You can close this window.")
-
-	// Send code to main goroutine
 	codeChan <- code
-}
-
-func exchangeCodeForToken(code, redirectURI string) (*Credentials, error) {
-	data := url.Values{
-		"client_id":     {ClientID},
-		"client_secret": {ClientSecret},
-		"code":          {code},
-		"redirect_uri":  {redirectURI},
-	}
-
-	resp, err := http.PostForm(TokenURL, data)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var tokenResp TokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return nil, err
-	}
-
-	if tokenResp.Error != "" {
-		return nil, fmt.Errorf("token exchange error: %s", tokenResp.Error)
-	}
-
-	if tokenResp.AccessToken == "" {
-		return nil, fmt.Errorf("empty access token received")
-	}
-
-	return &Credentials{
-		AccessToken: tokenResp.AccessToken,
-		TokenType:   tokenResp.TokenType,
-	}, nil
 }
 
 func saveCredentials(creds *Credentials) error {
