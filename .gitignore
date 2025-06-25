@@ -1,0 +1,96 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories (vendor/ and Godeps/)
+vendor/
+Godeps/
+
+# Go workspace file
+go.work
+
+# IDE/editor files
+.idea/
+*.swp
+*.swo
+*.vscode/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build directories
+dist/
+bin/
+
+# Environment files
+.env
+
+# Go module cache (if you ever use it outside of GOPATH)
+/pkg/mod/
+
+# Test result files
+*.coverprofile
+*.testresult
+
+# Miscellaneous
+*.tmp
+=======
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories (vendor/ and Godeps/)
+vendor/
+Godeps/
+
+# Go workspace file
+go.work
+
+# IDE/editor files
+.idea/
+*.swp
+*.swo
+*.vscode/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build directories
+dist/
+bin/
+
+# Environment files
+.env
+
+# Go module cache (if you ever use it outside of GOPATH)
+/pkg/mod/
+
+# Test result files
+*.coverprofile
+*.testresult
+
+# Miscellaneous
+*.tmp
+
