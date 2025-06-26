@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/mdjarv/todoist-cli/internal/auth"
-	"github.com/mdjarv/todoist-cli/internal/tasks"
+	"github.com/mdjarv/todoist-cli/internal/cli"
 	"github.com/mdjarv/todoist-cli/internal/todoist"
 	"github.com/spf13/cobra"
 )
@@ -15,16 +17,21 @@ var listCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		creds, err := auth.LoadCredentials()
 		if err != nil {
-			return fmt.Errorf("failed to load credentials, please login first")
+			fmt.Fprintln(os.Stderr, "failed to load credentials, please authenticate first")
+			os.Exit(1)
 		}
 
-		client := todoist.NewClient(creds.AccessToken)
-		return tasks.ListTasks(cmd.Context(), client)
+			jsonOut, _ := cmd.Flags().GetBool("json")
+			client := todoist.NewClient(creds.AccessToken)
+			return cli.List(cmd.Context(), client, jsonOut)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(listCmd)
+
+	// Add --json flag for outputting tasks as JSON
+	listCmd.Flags().Bool("json", false, "Output tasks as JSON")
 
 	// Here you will define your flags and configuration settings.
 

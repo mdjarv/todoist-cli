@@ -1,6 +1,7 @@
 package todoist
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,9 @@ type Client interface {
 	ListTasks(ctx context.Context, options *ListTasksOptions) (*TasksResponse, error)
 	ListProjects(ctx context.Context) (*ProjectsResponse, error)
 	ExchangeCodeForToken(code, redirectURI, clientID, clientSecret string) (*TokenResponse, error)
+	CloseTask(ctx context.Context, taskID string) error
+	ReopenTask(ctx context.Context, taskID string) error
+	CreateTask(ctx context.Context, options CreateTaskOptions) error
 }
 
 type client struct {
@@ -35,30 +39,30 @@ func NewClient(accessToken string) Client {
 
 // Task types
 type Task struct {
-	UserID         string                 `json:"user_id"`
-	ID             string                 `json:"id"`
-	ProjectID      string                 `json:"project_id"`
-	SectionID      string                 `json:"section_id"`
-	ParentID       string                 `json:"parent_id"`
-	AddedByUID     string                 `json:"added_by_uid"`
-	AssignedByUID  string                 `json:"assigned_by_uid"`
-	ResponsibleUID string                 `json:"responsible_uid"`
-	Labels         []string               `json:"labels"`
-	Deadline       map[string]interface{} `json:"deadline"`
-	Duration       map[string]interface{} `json:"duration"`
-	Checked        bool                   `json:"checked"`
-	IsDeleted      bool                   `json:"is_deleted"`
-	AddedAt        string                 `json:"added_at"`
-	CompletedAt    string                 `json:"completed_at"`
-	UpdatedAt      string                 `json:"updated_at"`
-	Due            map[string]interface{} `json:"due"`
-	Priority       int                    `json:"priority"`
-	ChildOrder     int                    `json:"child_order"`
-	Content        string                 `json:"content"`
-	Description    string                 `json:"description"`
-	NoteCount      int                    `json:"note_count"`
-	DayOrder       int                    `json:"day_order"`
-	IsCollapsed    bool                   `json:"is_collapsed"`
+	UserID         string         `json:"user_id"`
+	ID             string         `json:"id"`
+	ProjectID      string         `json:"project_id"`
+	SectionID      string         `json:"section_id"`
+	ParentID       string         `json:"parent_id"`
+	AddedByUID     string         `json:"added_by_uid"`
+	AssignedByUID  string         `json:"assigned_by_uid"`
+	ResponsibleUID string         `json:"responsible_uid"`
+	Labels         []string       `json:"labels"`
+	Deadline       map[string]any `json:"deadline"`
+	Duration       map[string]any `json:"duration"`
+	Checked        bool           `json:"checked"`
+	IsDeleted      bool           `json:"is_deleted"`
+	AddedAt        string         `json:"added_at"`
+	CompletedAt    string         `json:"completed_at"`
+	UpdatedAt      string         `json:"updated_at"`
+	Due            map[string]any `json:"due"`
+	Priority       int            `json:"priority"`
+	ChildOrder     int            `json:"child_order"`
+	Content        string         `json:"content"`
+	Description    string         `json:"description"`
+	NoteCount      int            `json:"note_count"`
+	DayOrder       int            `json:"day_order"`
+	IsCollapsed    bool           `json:"is_collapsed"`
 }
 
 type TasksResponse struct {
@@ -71,26 +75,55 @@ type ListTasksOptions struct {
 	Limit  int
 }
 
+type CreateTaskOptions struct {
+	Content      string   `json:"content"`
+	Description  string   `json:"description,omitempty"`
+	ProjectID    string   `json:"project_id,omitempty"`
+	SectionID    string   `json:"section_id,omitempty"`
+	ParentID     string   `json:"parent_id,omitempty"`
+	Order        int      `json:"order,omitempty"`
+	Labels       []string `json:"labels,omitempty"`
+	Priority     int      `json:"priority,omitempty"`
+	AssigneeID   int      `json:"assignee_id,omitempty"`
+	DueDate      string   `json:"due_date,omitempty"`
+	DueString    string   `json:"due_string,omitempty"`
+	DueDatetime  string   `json:"due_datetime,omitempty"`
+	DueLang      string   `json:"due_lang,omitempty"`
+	Duration     int      `json:"duration,omitempty"`
+	DurationUnit string   `json:"duration_unit,omitempty"`
+	DeadlineDate string   `json:"deadline_date,omitempty"`
+	DeadlineLang string   `json:"deadline_lang,omitempty"`
+}
+
 // Project types
 type Project struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	CommentCount  int    `json:"comment_count"`
-	Order         int    `json:"order"`
-	Color         string `json:"color"`
-	Shared        bool   `json:"shared"`
-	SyncID        int    `json:"sync_id"`
-	FavoriteDelim string `json:"favorite_delim"`
-	Favorite      bool   `json:"favorite"`
-	InboxProject  bool   `json:"inbox_project"`
-	TeamInbox     bool   `json:"team_inbox"`
-	ViewStyle     string `json:"view_style"`
-	URL           string `json:"url"`
-	ParentID      string `json:"parent_id"`
+	ID             string         `json:"id"`
+	CanAssignTasks bool           `json:"can_assign_tasks"`
+	ChildOrder     int            `json:"child_order"`
+	Color          string         `json:"color"`
+	CreatorUID     string         `json:"creator_uid"`
+	CreatedAt      string         `json:"created_at"`
+	IsArchived     bool           `json:"is_archived"`
+	IsDeleted      bool           `json:"is_deleted"`
+	IsFavorite     bool           `json:"is_favorite"`
+	IsFrozen       bool           `json:"is_frozen"`
+	Name           string         `json:"name"`
+	UpdatedAt      string         `json:"updated_at"`
+	ViewStyle      string         `json:"view_style"`
+	DefaultOrder   int            `json:"default_order"`
+	Description    string         `json:"description"`
+	PublicKey      string         `json:"public_key"`
+	Access         map[string]any `json:"access"`
+	Role           string         `json:"role"`
+	ParentID       string         `json:"parent_id"`
+	InboxProject   bool           `json:"inbox_project"`
+	IsCollapsed    bool           `json:"is_collapsed"`
+	IsShared       bool           `json:"is_shared"`
 }
 
 type ProjectsResponse struct {
-	Projects []Project `json:"projects"`
+	Results    []Project `json:"results"`
+	NextCursor string    `json:"next_cursor"`
 }
 
 // OAuth types
@@ -152,6 +185,80 @@ func (c *client) ListTasks(ctx context.Context, options *ListTasksOptions) (*Tas
 	return &tasksResp, nil
 }
 
+func (c *client) CloseTask(ctx context.Context, taskID string) error {
+	apiURL := BaseURL + "/tasks/" + taskID + "/close"
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("API error: %d %s", resp.StatusCode, resp.Status)
+	}
+
+	return nil
+}
+
+func (c *client) ReopenTask(ctx context.Context, taskID string) error {
+	apiURL := BaseURL + "/tasks/" + taskID + "/reopen"
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("API error: %d %s", resp.StatusCode, resp.Status)
+	}
+
+	return nil
+}
+
+func (c *client) CreateTask(ctx context.Context, options CreateTaskOptions) error {
+	apiURL := BaseURL + "/tasks"
+
+	requestBody, err := json.Marshal(options)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error: %d %s: %s", resp.StatusCode, resp.Status, body)
+	}
+
+	return nil
+}
+
 // Project methods
 func (c *client) ListProjects(ctx context.Context) (*ProjectsResponse, error) {
 	apiURL := BaseURL + "/projects"
@@ -183,12 +290,12 @@ func (c *client) ListProjects(ctx context.Context) (*ProjectsResponse, error) {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	var projects []Project
-	if err := json.Unmarshal(body, &projects); err != nil {
+	var projResp ProjectsResponse
+	if err := json.Unmarshal(body, &projResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	return &ProjectsResponse{Projects: projects}, nil
+	return &projResp, nil
 }
 
 // OAuth methods
